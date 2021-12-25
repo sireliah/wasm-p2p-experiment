@@ -12,7 +12,7 @@
       // will "boot" the module and make it ready to use. Currently browsers
       // don't support natively imported WebAssembly as an ES module, but
       // eventually the manual initialization won't be required!
-      import init, { info, listen, Server } from './pkg/hello.js';
+      import init, { info, Server } from './pkg/hello.js';
 
       async function run() {
         // First up we need to actually load the wasm file, so we use the
@@ -47,15 +47,37 @@
         info("haaaaalloo");
       }
 
-      function getForm() {
+      function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+      }
+
+
+      async function getForm() {
+        function set_whoami(server) {
+          const self_peer = server.whoami()
+          let peer_info = document.getElementById("peer_info");
+          peer_info.innerHTML = `I am peer: ${self_peer}`
+        }
+
+        let server = new Server();
+        set_whoami(server);
+
+        server.run_discovery();
 
         const form = document.getElementById("peer");
         const address = form.address.value;
         console.log(address);
-        // listen(address);
 
-        let server = new Server();
-        server.discover_peers(address);
+        for (let i = 0; i < 100; i++) {
+          await sleep(1000);
+          let peer = await server.get_peer();
+          console.log(`JS: Peer: ${peer}`);
+          let elem = document.getElementById("peer");
+          if (!elem.querySelector(`#peer_${peer}`)) {
+            elem.innerHTML += `<div id="peer_${peer}">${peer}</div>`
+          }
+        }
+
       };
 
       window.getForm = getForm;
@@ -63,9 +85,11 @@
       run();
     </script>
     <!-- <input type="file" id="file" name="file"> -->
+    <span id="peer_info"></span>
     <form id="peer", action="">
       <input type="text" name="address"><br>
       <input type="button" onclick="window.getForm()" value="Submit">
     </form>
+    <div id="peer"></div>
   </body>
 </html>

@@ -7,6 +7,7 @@ use libp2p::{
     ping::{Ping, PingConfig, PingEvent},
     rendezvous::{
         client::Behaviour as RendezvousBehaviour, client::Event as RendezvousEvent, Namespace,
+        Registration,
     },
     swarm::{AddressScore, SwarmBuilder, SwarmEvent},
     Multiaddr, NetworkBehaviour, PeerId, Swarm, Transport,
@@ -19,8 +20,6 @@ use libp2p::wasm_ext;
 
 use js_sys::Promise;
 use libp2p_webrtc::WebRtcTransport;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{future_to_promise, spawn_local};
@@ -89,7 +88,7 @@ pub struct Server {
     rendezvous_addr: Multiaddr,
     local_keys: Keypair,
     tx: Sender<PeerRecord>,
-    rx: Rc<RefCell<Receiver<PeerRecord>>>,
+    rx: Receiver<PeerRecord>,
 }
 
 #[wasm_bindgen]
@@ -100,19 +99,44 @@ impl Server {
         let local_keys = identity::Keypair::generate_ed25519();
         let (tx, rx): (Sender<PeerRecord>, Receiver<PeerRecord>) = channel(100);
 
-        let receiver = Rc::new(RefCell::new(rx));
         Server {
             rendezvous_addr,
             local_keys,
             tx,
-            rx: receiver,
+            rx,
         }
+    }
+
+    fn peer_id(&self) -> PeerId {
+        PeerId::from(&self.local_keys.public())
+    }
+
+    #[wasm_bindgen]
+    pub fn whoami(&self) -> String {
+        self.peer_id().to_string()
+    }
+
+    #[wasm_bindgen]
+    pub fn get_peer(&mut self) -> Promise {
+        let next = self.rx.try_next();
+        future_to_promise(async {
+            match next {
+                Ok(result) => match result {
+                    Some(record) => Ok(JsValue::from(record.peer_id().to_string())),
+                    None => Ok(JsValue::from("")),
+                },
+                Err(err) => {
+                    console_log!("Recv error: {:?}", err);
+                    Ok(JsValue::from(""))
+                }
+            }
+        })
     }
 
     // Why this function cannot be async?
     // https://github.com/rustwasm/wasm-bindgen/issues/1858
     #[wasm_bindgen]
-    pub fn discover_peers(&mut self, peer_address: String) {
+    pub fn run_discovery(&mut self) {
         let mut swarm = build_ws_swarm(self.local_keys.clone());
         swarm.add_external_address(self.rendezvous_addr.clone(), AddressScore::Infinite);
 
@@ -121,6 +145,7 @@ impl Server {
             .expect("Dialing rendezvous failed");
 
         let mut tx = self.tx.clone();
+        let local_peer_id = self.peer_id();
         future_to_promise(async move {
             while let Some(event) = swarm.next().await {
                 match event {
@@ -129,12 +154,12 @@ impl Server {
                         address,
                     } => {
                         console_log!("New listener: {:?}, Address: {:?}", listener_id, address);
-                        if peer_address.len() > 0 {
-                            let addr = peer_address
-                                .parse::<Multiaddr>()
-                                .expect("Parsing address failed");
-                            swarm.dial(addr).expect("Dialing failed");
-                        }
+                        // if peer_address.len() > 0 {
+                        //     let addr = peer_address
+                        //         .parse::<Multiaddr>()
+                        //         .expect("Parsing address failed");
+                        //     swarm.dial(addr).expect("Dialing failed");
+                        // }
                     }
                     SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                         console_log!("Connection established: {:?}", peer_id);
@@ -168,9 +193,12 @@ impl Server {
                                 registration.record.addresses(),
                                 registration.record.peer_id()
                             );
-                            tx.send(registration.record)
-                                .await
-                                .expect("Sending record failed");
+                            if registration.record.peer_id() != local_peer_id {
+                                console_log!("  Adding peer to queue: {:?}", registration.record);
+                                tx.send(registration.record)
+                                    .await
+                                    .expect("Sending record failed");
+                            }
                         }
                     }
                     SwarmEvent::Behaviour(MyEvent::Ping(PingEvent { result, peer })) => {
@@ -186,114 +214,6 @@ impl Server {
             Ok(JsValue::from(true))
         });
     }
-}
-
-#[wasm_bindgen]
-pub async fn listen(peer_address: String) {
-    utils::set_panic_hook();
-    let local_keys = identity::Keypair::generate_ed25519();
-    let local_keys_clone = local_keys.clone();
-    let webrtc_addr = "/ip4/127.0.0.1/tcp/8000/ws/p2p-webrtc-star"
-        .parse::<Multiaddr>()
-        .unwrap();
-    let rendezvous_addr = "/ip4/127.0.0.1/tcp/45555/ws".parse::<Multiaddr>().unwrap();
-
-    let mut swarm = build_ws_swarm(local_keys);
-    let mut webrtc_swarm = build_webrtc_swarm(local_keys_clone);
-
-    // "/dns4/wrtc-star1.par.dwebops.pub/tcp/443/wss/p2p-webrtc-star"
-    // let address = "/dns4/127.0.0.1/tcp/8000/ws/p2p-webrtc-star"
-    //     .parse()
-    //     .unwrap();
-    swarm.add_external_address(rendezvous_addr.clone(), AddressScore::Infinite);
-
-    // TODO: this might fill up pretty quickly
-    let (mut tx, rx) = channel(100);
-
-    webrtc_swarm.listen_on(webrtc_addr).unwrap();
-
-    swarm
-        .dial(rendezvous_addr)
-        .expect("Dialing rendezvous failed");
-    let sw1 = async move {
-        while let Some(event) = swarm.next().await {
-            match event {
-                SwarmEvent::NewListenAddr {
-                    listener_id,
-                    address,
-                } => {
-                    console_log!("New listener: {:?}, Address: {:?}", listener_id, address);
-                    if peer_address.len() > 0 {
-                        let addr = peer_address
-                            .parse::<Multiaddr>()
-                            .expect("Parsing address failed");
-                        swarm.dial(addr).expect("Dialing failed");
-                    }
-                }
-                SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                    console_log!("Connection established: {:?}", peer_id);
-                    // TODO: check if this is rendezvous server
-                    let behaviour = swarm.behaviour_mut();
-                    let namespace = Namespace::new("discovery".to_string())
-                        .expect("Failed to create namespace");
-                    let namespace_c = namespace.clone();
-                    console_log!("Registering");
-                    behaviour.rendezvous.register(namespace, peer_id, None);
-
-                    console_log!("Discovering");
-                    behaviour
-                        .rendezvous
-                        .discover(Some(namespace_c), None, None, peer_id);
-                }
-                SwarmEvent::Behaviour(MyEvent::Rendezvous(RendezvousEvent::Registered {
-                    namespace,
-                    ..
-                })) => {
-                    console_log!("Registered in {:?}", namespace);
-                }
-                SwarmEvent::Behaviour(MyEvent::Rendezvous(RendezvousEvent::Discovered {
-                    registrations,
-                    ..
-                })) => {
-                    console_log!("Discovered some peers!");
-                    for registration in registrations {
-                        console_log!(
-                            "  Peer: {:?}, Addresses: {:?}",
-                            registration.record.addresses(),
-                            registration.record.peer_id()
-                        );
-                        tx.send(registration.record)
-                            .await
-                            .expect("Sending record failed");
-                    }
-                }
-                SwarmEvent::Behaviour(MyEvent::Ping(PingEvent { result, peer })) => {
-                    console_log!("Ping {:?}", result);
-                    let behaviour = swarm.behaviour_mut();
-                    discover(behaviour, peer);
-                }
-                other => console_log!("Event: {:?}", other),
-            }
-        }
-        swarm
-    };
-    let sw2 = async move {
-        while let Some(event) = webrtc_swarm.next().await {
-            match event {
-                SwarmEvent::NewListenAddr { address, .. } => {
-                    console_log!("Webrtc: new listener: {:?}", address);
-                }
-                SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                    console_log!("Webrtc: established to {:?}", peer_id);
-                }
-                other => {
-                    console_log!("Webrtc: other: {:?}", other);
-                }
-            };
-        }
-        webrtc_swarm
-    };
-    futures::join!(sw1, sw2);
 }
 
 fn build_ws_swarm(local_keys: identity::Keypair) -> Swarm<MyBehaviour> {
@@ -317,7 +237,7 @@ fn build_ws_swarm(local_keys: identity::Keypair) -> Swarm<MyBehaviour> {
             .upgrade(upgrade::Version::V1Lazy)
             .authenticate(noise)
             .multiplex(mp.clone())
-            .timeout(std::time::Duration::from_secs(20))
+            .timeout(std::time::Duration::from_secs(200))
             .boxed()
     };
 
