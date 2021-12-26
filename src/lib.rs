@@ -21,6 +21,7 @@ use libp2p::wasm_ext;
 use js_sys::Promise;
 use libp2p_webrtc::WebRtcTransport;
 use std::time::Duration;
+use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{future_to_promise, spawn_local};
 
@@ -89,6 +90,7 @@ pub struct Server {
     local_keys: Keypair,
     tx: Sender<PeerRecord>,
     rx: Receiver<PeerRecord>,
+    known_peers: HashMap<String, PeerRecord>,
 }
 
 #[wasm_bindgen]
@@ -104,6 +106,7 @@ impl Server {
             local_keys,
             tx,
             rx,
+            known_peers: HashMap::new(),
         }
     }
 
@@ -119,17 +122,24 @@ impl Server {
     #[wasm_bindgen]
     pub fn get_peer(&mut self) -> Promise {
         let next = self.rx.try_next();
-        future_to_promise(async {
-            match next {
-                Ok(result) => match result {
-                    Some(record) => Ok(JsValue::from(record.peer_id().to_string())),
-                    None => Ok(JsValue::from("")),
+
+        let record = match next {
+            Ok(result) => match result {
+                Some(record) => {
+                    let peer_string = record.peer_id().to_string();
+                    self.known_peers.insert(peer_string.clone(), record.clone());
+                    Ok(JsValue::from(peer_string.clone()))
                 },
-                Err(err) => {
-                    console_log!("Recv error: {:?}", err);
-                    Ok(JsValue::from(""))
-                }
+                None => Ok(JsValue::from("")),
+            },
+            Err(err) => {
+                console_log!("Recv error: {:?}", err);
+                Ok(JsValue::from(""))
             }
+        };
+
+        future_to_promise(async {
+            record
         })
     }
 
@@ -237,7 +247,7 @@ fn build_ws_swarm(local_keys: identity::Keypair) -> Swarm<MyBehaviour> {
             .upgrade(upgrade::Version::V1Lazy)
             .authenticate(noise)
             .multiplex(mp.clone())
-            .timeout(std::time::Duration::from_secs(200))
+            .timeout(std::time::Duration::from_secs(20000))
             .boxed()
     };
 

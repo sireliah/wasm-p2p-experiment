@@ -45,51 +45,65 @@
 
         // And afterwards we can use all the functionality defined in wasm.
         info("haaaaalloo");
+        const server = await initServer();
+        return server;
       }
 
       function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
       }
 
+      async function addPeer(server) {
+          const peer = await server.get_peer();
+          console.log(`JS: Peer: ${peer}`);
+          let elem = document.querySelector("#peer_list");
+          if (!elem.querySelector(`#peer_${peer}`)) {
+            elem.innerHTML += `<div id="peer_${peer}">${peer}</div>`
+          }
+      }
 
-      async function getForm() {
-        function set_whoami(server) {
+      async function initServer() {
+        function setWhoami(server) {
           const self_peer = server.whoami()
           let peer_info = document.getElementById("peer_info");
           peer_info.innerHTML = `I am peer: ${self_peer}`
         }
 
-        let server = new Server();
-        set_whoami(server);
+        const server = new Server();
+        setWhoami(server);
 
         server.run_discovery();
 
-        const form = document.getElementById("peer");
-        const address = form.address.value;
-        console.log(address);
+        // const form = document.getElementById("peer");
+        // const address = form.address.value;
+        // console.log(address);
 
-        for (let i = 0; i < 100; i++) {
-          await sleep(1000);
-          let peer = await server.get_peer();
-          console.log(`JS: Peer: ${peer}`);
-          let elem = document.getElementById("peer");
-          if (!elem.querySelector(`#peer_${peer}`)) {
-            elem.innerHTML += `<div id="peer_${peer}">${peer}</div>`
-          }
-        }
+        setInterval(async function () { await addPeer(server) }, 2000);
 
+        return server;
       };
 
-      window.getForm = getForm;
+      async function getForm(server) {
+        console.log("Form clicked");
 
-      run();
+        // TODO: Implement interface to dial specific peer
+        await addPeer(server);
+        // console.log(`Server: ${server}`);
+        // console.log(`JS FORM: Peer: ${peer}`);
+      }
+
+      const server = await run();
+
+      let form_button = document.querySelector("#peer_submit");
+      form_button.addEventListener("click", async function aaa() {await getForm(server)});
+
     </script>
     <!-- <input type="file" id="file" name="file"> -->
     <span id="peer_info"></span>
-    <form id="peer", action="">
+    <form id="peer_form" action="">
       <input type="text" name="address"><br>
-      <input type="button" onclick="window.getForm()" value="Submit">
+      <input type="button" id="peer_submit" value="Submit">
     </form>
-    <div id="peer"></div>
+    <div id="peer_list"></div>
   </body>
 </html>
