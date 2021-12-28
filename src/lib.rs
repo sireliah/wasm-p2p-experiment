@@ -6,6 +6,7 @@ use libp2p::{
     mplex, noise,
     ping::{Ping, PingConfig, PingEvent},
     rendezvous::{
+        Cookie,
         client::Behaviour as RendezvousBehaviour, client::Event as RendezvousEvent, Namespace,
         Registration,
     },
@@ -19,9 +20,9 @@ use futures::{SinkExt, StreamExt};
 use libp2p::wasm_ext;
 
 use js_sys::Promise;
-use libp2p_webrtc::WebRtcTransport;
-use std::time::Duration;
+// use libp2p_webrtc::WebRtcTransport;
 use std::collections::HashMap;
+use std::time::Duration;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{future_to_promise, spawn_local};
 
@@ -77,7 +78,7 @@ pub fn info(message: &str) {
     log(message);
 }
 
-fn discover(behaviour: &mut MyBehaviour, peer: PeerId) {
+fn discover(behaviour: &mut MyBehaviour, peer: PeerId, cookie: Cookie) {
     let namespace = Namespace::new("discovery".to_string()).expect("Failed to create namespace");
     behaviour
         .rendezvous
@@ -99,7 +100,7 @@ impl Server {
     pub fn new() -> Server {
         let rendezvous_addr = "/ip4/127.0.0.1/tcp/45555/ws".parse::<Multiaddr>().unwrap();
         let local_keys = identity::Keypair::generate_ed25519();
-        let (tx, rx): (Sender<PeerRecord>, Receiver<PeerRecord>) = channel(100);
+        let (tx, rx): (Sender<PeerRecord>, Receiver<PeerRecord>) = channel(1024 * 1024);
 
         Server {
             rendezvous_addr,
@@ -129,7 +130,7 @@ impl Server {
                     let peer_string = record.peer_id().to_string();
                     self.known_peers.insert(peer_string.clone(), record.clone());
                     Ok(JsValue::from(peer_string.clone()))
-                },
+                }
                 None => Ok(JsValue::from("")),
             },
             Err(err) => {
@@ -138,25 +139,25 @@ impl Server {
             }
         };
 
-        future_to_promise(async {
-            record
-        })
+        future_to_promise(async { record })
     }
 
     // Why this function cannot be async?
     // https://github.com/rustwasm/wasm-bindgen/issues/1858
     #[wasm_bindgen]
     pub fn run_discovery(&mut self) {
+        let addr = self.rendezvous_addr.clone();
         let mut swarm = build_ws_swarm(self.local_keys.clone());
         swarm.add_external_address(self.rendezvous_addr.clone(), AddressScore::Infinite);
 
         swarm
-            .dial(self.rendezvous_addr.clone())
+            .dial(addr.clone())
             .expect("Dialing rendezvous failed");
 
         let mut tx = self.tx.clone();
         let local_peer_id = self.peer_id();
         future_to_promise(async move {
+            let mut cookie = None;
             while let Some(event) = swarm.next().await {
                 match event {
                     SwarmEvent::NewListenAddr {
@@ -181,22 +182,28 @@ impl Server {
                         console_log!("Registering");
                         behaviour.rendezvous.register(namespace, peer_id, None);
 
-                        console_log!("Discovering");
-                        behaviour
-                            .rendezvous
-                            .discover(Some(namespace_c), None, None, peer_id);
+                    }
+                    SwarmEvent::ConnectionClosed {peer_id, cause, ..} => {
+                        console_log!("Connection closed: {:?}", cause);
+                        swarm.dial(addr.clone()).expect("Re-dialing failed")
                     }
                     SwarmEvent::Behaviour(MyEvent::Rendezvous(RendezvousEvent::Registered {
-                        namespace,
+                        namespace, rendezvous_node,
                         ..
                     })) => {
                         console_log!("Registered in {:?}", namespace);
+                        console_log!("Discovering");
+                        let behaviour = swarm.behaviour_mut();
+                        behaviour
+                            .rendezvous
+                            .discover(Some(namespace), None, None, rendezvous_node);
                     }
                     SwarmEvent::Behaviour(MyEvent::Rendezvous(RendezvousEvent::Discovered {
-                        registrations,
+                        registrations, cookie: new_cookie,
                         ..
                     })) => {
                         console_log!("Discovered some peers!");
+                        cookie.replace(new_cookie);
                         for registration in registrations {
                             console_log!(
                                 "  Peer: {:?}, Addresses: {:?}",
@@ -212,9 +219,12 @@ impl Server {
                         }
                     }
                     SwarmEvent::Behaviour(MyEvent::Ping(PingEvent { result, peer })) => {
-                        console_log!("Ping {:?}", result);
-                        let behaviour = swarm.behaviour_mut();
-                        discover(behaviour, peer);
+                        console_log!("Ping: {:?}", result);
+                        if let Some(ref some_cookie) = cookie {
+                            console_log!("Will try to discover: {:?}", some_cookie);
+                            let behaviour = swarm.behaviour_mut();
+                            discover(behaviour, peer, some_cookie.clone());
+                        }
                     }
                     other => console_log!("Event: {:?}", other),
                 }
@@ -253,41 +263,45 @@ fn build_ws_swarm(local_keys: identity::Keypair) -> Swarm<MyBehaviour> {
 
     let behaviour = MyBehaviour {
         rendezvous: RendezvousBehaviour::new(local_keys),
-        ping: Ping::new(PingConfig::new().with_interval(Duration::from_secs(2))),
+        ping: Ping::new(
+            PingConfig::new()
+                .with_timeout(Duration::from_secs(20000))
+                .with_interval(Duration::from_secs(1)),
+        ),
     };
 
     let swarm = SwarmBuilder::new(transport, behaviour, local_peer_id);
     swarm.build()
 }
 
-#[allow(dead_code)]
-fn build_webrtc_swarm(local_keys: identity::Keypair) -> Swarm<Ping> {
-    let local_peer_id = PeerId::from(&local_keys.public());
+// #[allow(dead_code)]
+// fn build_webrtc_swarm(local_keys: identity::Keypair) -> Swarm<Ping> {
+//     let local_peer_id = PeerId::from(&local_keys.public());
 
-    let transport_base = WebRtcTransport::new(local_peer_id, vec!["stun:stun.l.google.com:19302"]);
-    let transport = {
-        let noise_keys = noise::Keypair::<noise::X25519Spec>::new()
-            .into_authentic(&local_keys)
-            .expect("Failed to produce noise keys");
-        let mut mplex_config = mplex::MplexConfig::new();
+//     let transport_base = WebRtcTransport::new(local_peer_id, vec!["stun:stun.l.google.com:19302"]);
+//     let transport = {
+//         let noise_keys = noise::Keypair::<noise::X25519Spec>::new()
+//             .into_authentic(&local_keys)
+//             .expect("Failed to produce noise keys");
+//         let mut mplex_config = mplex::MplexConfig::new();
 
-        let mp = mplex_config
-            .set_max_buffer_size(40960)
-            .set_split_send_size(1024 * 512);
-        let noise = noise::NoiseConfig::xx(noise_keys).into_authenticated();
-        transport_base
-            .upgrade(upgrade::Version::V1Lazy)
-            .authenticate(noise)
-            .multiplex(mp.clone())
-            .timeout(std::time::Duration::from_secs(20))
-            .boxed()
-    };
+//         let mp = mplex_config
+//             .set_max_buffer_size(40960)
+//             .set_split_send_size(1024 * 512);
+//         let noise = noise::NoiseConfig::xx(noise_keys).into_authenticated();
+//         transport_base
+//             .upgrade(upgrade::Version::V1Lazy)
+//             .authenticate(noise)
+//             .multiplex(mp.clone())
+//             .timeout(std::time::Duration::from_secs(20))
+//             .boxed()
+//     };
 
-    let ping_behaviour = Ping::new(
-        PingConfig::new()
-            .with_interval(Duration::from_secs(2))
-            .with_keep_alive(true),
-    );
-    let swarm = SwarmBuilder::new(transport, ping_behaviour, local_peer_id);
-    swarm.executor(Box::new(|f| spawn_local(f))).build()
-}
+//     let ping_behaviour = Ping::new(
+//         PingConfig::new()
+//             .with_interval(Duration::from_secs(2))
+//             .with_keep_alive(true),
+//     );
+//     let swarm = SwarmBuilder::new(transport, ping_behaviour, local_peer_id);
+//     swarm.executor(Box::new(|f| spawn_local(f))).build()
+// }
