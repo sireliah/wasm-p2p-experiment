@@ -6,22 +6,22 @@ use libp2p::{
     mplex, noise,
     ping::{Ping, PingConfig, PingEvent},
     rendezvous::{
-        Cookie,
-        client::Behaviour as RendezvousBehaviour, client::Event as RendezvousEvent, Namespace,
-        Registration,
+        client::Behaviour as RendezvousBehaviour, client::Event as RendezvousEvent, Cookie,
+        Namespace, Registration,
     },
     swarm::{AddressScore, SwarmBuilder, SwarmEvent},
     Multiaddr, NetworkBehaviour, PeerId, Swarm, Transport,
 };
 
 use futures;
-use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::{SinkExt, StreamExt};
 use libp2p::wasm_ext;
 
 use js_sys::Promise;
 // use libp2p_webrtc::WebRtcTransport;
 use std::collections::HashMap;
+use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{future_to_promise, spawn_local};
@@ -39,6 +39,8 @@ macro_rules! console_log {
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
+const NAMESPACE: &str = "discovery";
 
 #[wasm_bindgen]
 extern "C" {
@@ -79,7 +81,7 @@ pub fn info(message: &str) {
 }
 
 fn discover(behaviour: &mut MyBehaviour, peer: PeerId, cookie: Cookie) {
-    let namespace = Namespace::new("discovery".to_string()).expect("Failed to create namespace");
+    let namespace = Namespace::new(NAMESPACE.to_string()).expect("Failed to create namespace");
     behaviour
         .rendezvous
         .discover(Some(namespace), None, None, peer);
@@ -89,9 +91,7 @@ fn discover(behaviour: &mut MyBehaviour, peer: PeerId, cookie: Cookie) {
 pub struct Server {
     rendezvous_addr: Multiaddr,
     local_keys: Keypair,
-    tx: Sender<PeerRecord>,
-    rx: Receiver<PeerRecord>,
-    known_peers: HashMap<String, PeerRecord>,
+    known_peers: Arc<Mutex<HashMap<String, PeerRecord>>>,
 }
 
 #[wasm_bindgen]
@@ -100,14 +100,11 @@ impl Server {
     pub fn new() -> Server {
         let rendezvous_addr = "/ip4/127.0.0.1/tcp/45555/ws".parse::<Multiaddr>().unwrap();
         let local_keys = identity::Keypair::generate_ed25519();
-        let (tx, rx): (Sender<PeerRecord>, Receiver<PeerRecord>) = channel(1024 * 1024);
 
         Server {
             rendezvous_addr,
             local_keys,
-            tx,
-            rx,
-            known_peers: HashMap::new(),
+            known_peers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -121,25 +118,17 @@ impl Server {
     }
 
     #[wasm_bindgen]
-    pub fn get_peer(&mut self) -> Promise {
-        let next = self.rx.try_next();
-
-        let record = match next {
-            Ok(result) => match result {
-                Some(record) => {
-                    let peer_string = record.peer_id().to_string();
-                    self.known_peers.insert(peer_string.clone(), record.clone());
-                    Ok(JsValue::from(peer_string.clone()))
-                }
-                None => Ok(JsValue::from("")),
-            },
-            Err(err) => {
-                console_log!("Recv error: {:?}", err);
-                Ok(JsValue::from(""))
-            }
-        };
-
-        future_to_promise(async { record })
+    pub fn get_peers(&mut self) -> Promise {
+        let peers = self
+            .known_peers
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(name, record)| record.peer_id().to_string())
+            .collect::<Vec<String>>();
+        let peers = peers.join(" ");
+        let peers_result = Ok(JsValue::from(peers));
+        future_to_promise(async { peers_result })
     }
 
     // Why this function cannot be async?
@@ -150,11 +139,9 @@ impl Server {
         let mut swarm = build_ws_swarm(self.local_keys.clone());
         swarm.add_external_address(self.rendezvous_addr.clone(), AddressScore::Infinite);
 
-        swarm
-            .dial(addr.clone())
-            .expect("Dialing rendezvous failed");
+        swarm.dial(addr.clone()).expect("Dialing rendezvous failed");
 
-        let mut tx = self.tx.clone();
+        let known_peers = self.known_peers.clone();
         let local_peer_id = self.peer_id();
         future_to_promise(async move {
             let mut cookie = None;
@@ -165,30 +152,40 @@ impl Server {
                         address,
                     } => {
                         console_log!("New listener: {:?}, Address: {:?}", listener_id, address);
-                        // if peer_address.len() > 0 {
-                        //     let addr = peer_address
-                        //         .parse::<Multiaddr>()
-                        //         .expect("Parsing address failed");
-                        //     swarm.dial(addr).expect("Dialing failed");
-                        // }
                     }
                     SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                         console_log!("Connection established: {:?}", peer_id);
                         // TODO: check if this is rendezvous server
                         let behaviour = swarm.behaviour_mut();
-                        let namespace = Namespace::new("discovery".to_string())
+                        let namespace = Namespace::new(NAMESPACE.to_string())
                             .expect("Failed to create namespace");
-                        let namespace_c = namespace.clone();
                         console_log!("Registering");
                         behaviour.rendezvous.register(namespace, peer_id, None);
-
                     }
-                    SwarmEvent::ConnectionClosed {peer_id, cause, ..} => {
-                        console_log!("Connection closed: {:?}", cause);
+                    SwarmEvent::ConnectionClosed {
+                        peer_id,
+                        cause,
+                        endpoint,
+                        num_established,
+                    } => {
+                        console_log!(
+                            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                        );
+                        console_log!(
+                            "Connection closed: {:?}, Endpoint: {:?}, Num established: {:?}",
+                            cause,
+                            endpoint,
+                            num_established
+                        );
+                        console_log!(
+                            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                        );
+
                         swarm.dial(addr.clone()).expect("Re-dialing failed")
                     }
                     SwarmEvent::Behaviour(MyEvent::Rendezvous(RendezvousEvent::Registered {
-                        namespace, rendezvous_node,
+                        namespace,
+                        rendezvous_node,
                         ..
                     })) => {
                         console_log!("Registered in {:?}", namespace);
@@ -199,7 +196,8 @@ impl Server {
                             .discover(Some(namespace), None, None, rendezvous_node);
                     }
                     SwarmEvent::Behaviour(MyEvent::Rendezvous(RendezvousEvent::Discovered {
-                        registrations, cookie: new_cookie,
+                        registrations,
+                        cookie: new_cookie,
                         ..
                     })) => {
                         console_log!("Discovered some peers!");
@@ -211,10 +209,13 @@ impl Server {
                                 registration.record.peer_id()
                             );
                             if registration.record.peer_id() != local_peer_id {
-                                console_log!("  Adding peer to queue: {:?}", registration.record);
-                                tx.send(registration.record)
-                                    .await
-                                    .expect("Sending record failed");
+                                known_peers
+                                    .lock()
+                                    .expect("Inserting on lock failed")
+                                    .insert(
+                                        registration.record.peer_id().to_string(),
+                                        registration.record,
+                                    );
                             }
                         }
                     }
@@ -265,8 +266,9 @@ fn build_ws_swarm(local_keys: identity::Keypair) -> Swarm<MyBehaviour> {
         rendezvous: RendezvousBehaviour::new(local_keys),
         ping: Ping::new(
             PingConfig::new()
-                .with_timeout(Duration::from_secs(20000))
-                .with_interval(Duration::from_secs(1)),
+                .with_timeout(Duration::from_secs(2000))
+                .with_interval(Duration::from_secs(1))
+                .with_max_failures(NonZeroU32::new(100).unwrap()),
         ),
     };
 

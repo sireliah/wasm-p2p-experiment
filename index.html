@@ -54,11 +54,15 @@
       }
 
       async function addPeer(server) {
-          const peer = await server.get_peer();
-          console.log(`JS: Peer: ${peer}`);
+          const peers_str = await server.get_peers();
+          console.log(`JS: Peer: ${peers_str}`);
+          const peers = peers_str.split(" ");
+
           let elem = document.querySelector("#peer_list");
-          if (!elem.querySelector(`#peer_${peer}`)) {
-            elem.innerHTML += `<div id="peer_${peer}">${peer}</div>`
+          for (let peer of peers) {
+            if (!elem.querySelector(`#peer_${peer}`)) {
+              elem.innerHTML += `<div id="peer_${peer}">${peer}</div>`;
+            }
           }
       }
 
@@ -88,8 +92,6 @@
 
         // TODO: Implement interface to dial specific peer
         await addPeer(server);
-        // console.log(`Server: ${server}`);
-        // console.log(`JS FORM: Peer: ${peer}`);
       }
 
       const server = await run();

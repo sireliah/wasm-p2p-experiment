@@ -12,7 +12,7 @@ default = ["console_error_panic_hook"]
 
 [dependencies]
 wasm-bindgen = "0.2.63"
-libp2p = { git = "https://github.com/sireliah/rust-libp2p", branch = "rendezvous-tweak", default_features = false }
+libp2p = { git = "https://github.com/sireliah/rust-libp2p", rev = "0c496afb9f7c634196d7b97e01a458abcb3dc90e", default_features = false }
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
@@ -34,7 +34,7 @@ futures-macro = "0.3.17"
 js-sys = "0.3.55"
 futures-timer = { version = "3.0.2", features = ["wasm-bindgen"] }
 send_wrapper = { version = "0.5.0", features = ["futures"] }
-libp2p = { git = "https://github.com/sireliah/rust-libp2p", branch = "rendezvous-tweak", features = ["wasm-bindgen", "wasm-ext", "websocket", "wasm-ext-websocket", "mplex", "noise", "ping", "rendezvous"], default_features = false }
+libp2p = { git = "https://github.com/sireliah/rust-libp2p", rev = "0c496afb9f7c634196d7b97e01a458abcb3dc90e", features = ["wasm-bindgen", "wasm-ext", "websocket", "wasm-ext-websocket", "mplex", "noise", "ping", "rendezvous"], default_features = false }
 # libp2p-webrtc = { git = "https://github.com/sireliah/libp2p-webrtc" }
 ws_stream_wasm = "0.7.3"
 wasm-bindgen-futures = "0.4.28"
