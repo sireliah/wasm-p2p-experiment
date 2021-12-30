@@ -55,13 +55,15 @@
 
       async function addPeer(server) {
           const peers_str = await server.get_peers();
-          console.log(`JS: Peer: ${peers_str}`);
           const peers = peers_str.split(" ");
 
           let elem = document.querySelector("#peer_list");
           for (let peer of peers) {
             if (!elem.querySelector(`#peer_${peer}`)) {
-              elem.innerHTML += `<div id="peer_${peer}">${peer}</div>`;
+              let button_id = `peer_${peer}`;
+              elem.innerHTML += `<input type="button" id="${button_id}" value="${peer}"><br>`;
+              let form_button = document.querySelector(`#${button_id}`);
+              form_button.addEventListener("click", async function aaa() {await server.call_peer(peer)});
             }
           }
       }
@@ -106,6 +108,9 @@
       <input type="text" name="address"><br>
       <input type="button" id="peer_submit" value="Submit">
     </form>
-    <div id="peer_list"></div>
+
+    <form id="peer_send_form" action="">
+      <div id="peer_list"></div>
+    </form>
   </body>
 </html>

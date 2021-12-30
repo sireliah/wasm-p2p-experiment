@@ -35,9 +35,10 @@ js-sys = "0.3.55"
 futures-timer = { version = "3.0.2", features = ["wasm-bindgen"] }
 send_wrapper = { version = "0.5.0", features = ["futures"] }
 libp2p = { git = "https://github.com/sireliah/rust-libp2p", rev = "0c496afb9f7c634196d7b97e01a458abcb3dc90e", features = ["wasm-bindgen", "wasm-ext", "websocket", "wasm-ext-websocket", "mplex", "noise", "ping", "rendezvous"], default_features = false }
-# libp2p-webrtc = { git = "https://github.com/sireliah/libp2p-webrtc" }
+libp2p-webrtc = { git = "https://github.com/sireliah/libp2p-webrtc", rev = "a381f7aecf5915df63f6ea04a000547609058107" }
 ws_stream_wasm = "0.7.3"
 wasm-bindgen-futures = "0.4.28"
+async-channel = "1.6.1"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.13"

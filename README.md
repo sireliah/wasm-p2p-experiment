@@ -7,3 +7,8 @@ Try to see if [Dragit](https://github.com/sireliah/dragit) can be running in a b
 3. finally, use [Dragit](https://github.com/sireliah/dragit) protocol to transfer files between peers
 
 **Watch out**: this is experimental project. Expect dragons here.
+
+## TODO:
+- discovery by namespaces: preferably rendezvous server side
+- webrtc dialing
+- dragit protocol on webrtc
