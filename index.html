@@ -56,16 +56,21 @@
       async function addPeer(server) {
           const peers_str = await server.get_peers();
           const peers = peers_str.split(" ");
-
           let elem = document.querySelector("#peer_list");
           for (let peer of peers) {
+
             if (!elem.querySelector(`#peer_${peer}`)) {
               let button_id = `peer_${peer}`;
               elem.innerHTML += `<input type="button" id="${button_id}" value="${peer}"><br>`;
-              let form_button = document.querySelector(`#${button_id}`);
-              form_button.addEventListener("click", async function aaa() {await server.call_peer(peer)});
+            };
+          };
+
+          for (let child of document.querySelector("#peer_list").children) {
+            if (child.type === "button") {
+              child.addEventListener("click", async function () { await server.call_peer(child.value) });
             }
-          }
+          };
+
       }
 
       async function initServer() {
