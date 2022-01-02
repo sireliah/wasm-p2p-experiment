@@ -1,7 +1,14 @@
+use std::collections::HashMap;
+use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use async_channel::{bounded, Receiver, Sender};
+use futures::{future::join, select, FutureExt, StreamExt};
+
 use libp2p::{
     core::transport::upgrade,
     core::PeerRecord,
-    futures::future::join,
     identity::{self, Keypair},
     mplex, noise,
     ping::{Ping, PingConfig, PingEvent},
@@ -10,22 +17,11 @@ use libp2p::{
         Namespace,
     },
     swarm::{AddressScore, SwarmBuilder, SwarmEvent},
-    Multiaddr, NetworkBehaviour, PeerId, Swarm, Transport,
+    wasm_ext, Multiaddr, NetworkBehaviour, PeerId, Swarm, Transport,
 };
-
-use futures;
-use futures::{SinkExt, StreamExt};
-// use futures::channel::mpsc::{channel, Sender, Receiver};
-use libp2p::wasm_ext;
-
-use async_channel::{bounded, Receiver, Sender};
 
 use js_sys::Promise;
 use libp2p_webrtc::WebRtcTransport;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::{collections::HashMap, fmt::format};
-use std::{num::NonZeroU32, thread::spawn};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{future_to_promise, spawn_local};
 
@@ -195,10 +191,10 @@ impl Server {
                         behaviour.rendezvous.register(namespace, peer_id, None);
                     }
                     SwarmEvent::ConnectionClosed {
-                        peer_id,
                         cause,
                         endpoint,
                         num_established,
+                        ..
                     } => {
                         console_log!(
                             "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
@@ -235,11 +231,6 @@ impl Server {
                         // console_log!("Discovered some peers!");
                         cookie.replace(new_cookie);
                         for registration in registrations {
-                            // console_log!(
-                            //     "  Peer: {:?}, Addresses: {:?}",
-                            //     registration.record.addresses(),
-                            //     registration.record.peer_id()
-                            // );
                             if registration.record.peer_id() != local_peer_id {
                                 known_peers
                                     .lock()
@@ -252,9 +243,8 @@ impl Server {
                         }
                     }
                     SwarmEvent::Behaviour(MyEvent::Ping(PingEvent { result, peer })) => {
-                        // console_log!("Ping: {:?}", result);
+                        // console_log!("Discovery: Ping: {:?}", result);
                         if let Some(ref some_cookie) = cookie {
-                            // console_log!("Will try to discover: {:?}", some_cookie);
                             let behaviour = swarm.behaviour_mut();
                             discover(behaviour, peer, some_cookie.clone());
                         }
@@ -266,42 +256,41 @@ impl Server {
         };
 
         let sw2 = async move {
-            spawn_local(async move {
-                let mut dialed = false;
-                while let Some(event) = swarm_webrtc.next().await {
-                    match event {
-                        SwarmEvent::NewListenAddr { address, .. } => {
-                            console_log!("Webrtc: new listener: {:?}", address);
-                        }
-                        SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                            console_log!("Webrtc: established to {:?}", peer_id);
-                            dialed = true;
-                        }
-                        other => {
-                            console_log!("Webrtc: other: {:?}", other);
-                            dialed = true;
-                        }
-                    };
-                    // This future slows swarm down
-                    if !dialed {
-                        match rx.recv().await {
-                            Ok(record) => {
-                                console_log!("Record!!! {:?}", record);
-                                let address = format!(
-                                    "/ip4/127.0.0.1/tcp/8080/ws/p2p-webrtc-star/p2p/{}",
-                                    record.peer_id()
-                                )
-                                .parse::<Multiaddr>()
-                                .expect("Parsing failed");
-                                swarm_webrtc.dial(address).expect("Dialing webrtc failed");
+            loop {
+                select! {
+                    event = swarm_webrtc.next().fuse() => {
+                        match event {
+                            Some(SwarmEvent::NewListenAddr { address, .. }) => {
+                                console_log!("Webrtc: new listener: {:?}", address);
                             }
-                            Err(e) => {
-                                console_log!("Recv error: {:?}", e);
+                            Some(SwarmEvent::ConnectionEstablished { peer_id, .. }) => {
+                                console_log!("Webrtc: established to {:?}", peer_id);
                             }
+                            Some(other) => {
+                                console_log!("Webrtc: other: {:?}", other);
+                            }
+                            None => console_log!("Nothing yet"),
                         };
-                    };
+                    }
+                    record = rx.recv().fuse() => {
+                        match record {
+                                Ok(rec) => {
+                                    console_log!("Record!!! {:?}", rec);
+                                    let address = format!(
+                                        "/ip4/127.0.0.1/tcp/8080/ws/p2p-webrtc-star/p2p/{}",
+                                        rec.peer_id()
+                                    )
+                                    .parse::<Multiaddr>()
+                                    .expect("Parsing failed");
+                                    swarm_webrtc.dial(address).expect("Dialing webrtc failed");
+                                }
+                                Err(e) => {
+                                    console_log!("Recv error: {:?}", e);
+                                }
+                            };
+                        }
                 }
-            });
+            }
         };
 
         future_to_promise(async move {
@@ -313,14 +302,6 @@ impl Server {
     }
 }
 
-// let sw = async { swarm };
-// let sw2 = async {
-//     // while let Ok(record) = rx.recv().await {
-//     //     console_log!("Record!!! {:?}", record);
-
-//     // }
-//     swarm_webrtc
-// };
 fn build_ws_swarm(local_keys: identity::Keypair) -> Swarm<MyBehaviour> {
     let local_peer_id = PeerId::from(&local_keys.public());
 
