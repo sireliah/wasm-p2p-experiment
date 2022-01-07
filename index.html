@@ -49,10 +49,6 @@
         return server;
       }
 
-      function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-      }
-
       async function addPeer(server) {
           const peers_str = await server.get_peers();
           const peers = peers_str.split(" ");
