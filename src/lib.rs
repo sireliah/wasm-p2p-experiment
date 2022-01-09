@@ -35,6 +35,7 @@ macro_rules! console_log {
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 const NAMESPACE: &str = "discovery";
+const SERVER_ADDR: &str = "127.0.0.1";
 
 #[wasm_bindgen]
 extern "C" {
@@ -70,7 +71,7 @@ pub struct Server {
 impl Server {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Server {
-        let rendezvous_addr = "/ip4/127.0.0.1/tcp/45555/ws".parse::<Multiaddr>().unwrap();
+        let rendezvous_addr = format!("/ip4/{}/tcp/45555/ws", SERVER_ADDR).parse::<Multiaddr>().unwrap();
         let local_keys = identity::Keypair::generate_ed25519();
 
         let (tx, rx): (Sender<PeerRecord>, Receiver<PeerRecord>) = bounded(1024);
@@ -125,7 +126,7 @@ impl Server {
     #[wasm_bindgen]
     pub fn run_discovery(&mut self) {
         let addr = self.rendezvous_addr.clone();
-        let webrtc_addr = "/ip4/127.0.0.1/tcp/8080/ws/p2p-webrtc-star"
+        let webrtc_addr = format!("/ip4/{}/tcp/8080/ws/p2p-webrtc-star", SERVER_ADDR)
             .parse::<Multiaddr>()
             .unwrap();
         let mut swarm = build_ws_swarm(self.local_keys.clone());
@@ -247,7 +248,8 @@ impl Server {
                                 Ok(rec) => {
                                     console_log!("Record!!! {:?}", rec);
                                     let address = format!(
-                                        "/ip4/127.0.0.1/tcp/8080/ws/p2p-webrtc-star/p2p/{}",
+                                        "/ip4/{}/tcp/8080/ws/p2p-webrtc-star/p2p/{}",
+                                        SERVER_ADDR,
                                         rec.peer_id()
                                     )
                                     .parse::<Multiaddr>()
