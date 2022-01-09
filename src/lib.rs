@@ -19,9 +19,20 @@ use wasm_bindgen_futures::future_to_promise;
 
 mod swarm;
 mod utils;
+pub mod commands;
+pub mod behaviour;
+pub mod file;
+pub mod metadata;
+pub mod peer;
+pub mod protocol;
+
+pub mod proto {
+    include!(concat!(env!("OUT_DIR"), "/dragit.p2p.transfer.metadata.rs"));
+}
 
 use swarm::{build_webrtc_swarm, build_ws_swarm, MyBehaviour, MyEvent};
 
+#[macro_export]
 macro_rules! console_log {
     // Note that this is using the `log` function imported above during
     // `bare_bones`

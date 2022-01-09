@@ -39,10 +39,18 @@ libp2p-webrtc = { git = "https://github.com/sireliah/libp2p-webrtc", rev = "a381
 ws_stream_wasm = "0.7.3"
 wasm-bindgen-futures = "0.4.28"
 async-channel = "1.6.1"
+async-std = { version = "1.7.0", features = [ "unstable" ] }
+prost = "0.7.0"
+prost-build = "0.9.0"
+hex = "0.4.2"
+md-5 = "0.8.0"
+
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.13"
 
+[build-dependencies]
+prost-build = "0.9.0"
 # TODO: enable
 # [profile.release]
 # # Tell `rustc` to optimize for small code size.
