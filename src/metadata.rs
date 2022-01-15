@@ -9,11 +9,11 @@ use hex;
 use md5::{Digest, Md5};
 use prost::Message;
 
-use crate::log;
 use crate::console_log;
 use crate::file::FileToSend;
-use crate::protocol::TSocketAlias;
+use crate::log;
 use crate::peer::TransferType;
+use crate::protocol::TSocketAlias;
 
 pub const ANSWER_SIZE: usize = 2;
 pub const PACKET_SIZE: usize = 1024;

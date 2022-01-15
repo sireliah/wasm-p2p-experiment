@@ -7,8 +7,8 @@ use std::path::Path;
 
 use libp2p::core::PeerId;
 
-use crate::log;
 use crate::console_log;
+use crate::log;
 use crate::peer::TransferType;
 
 #[derive(Clone, Debug)]
@@ -72,19 +72,20 @@ impl FileToSend {
     //     }
     // }
 
-    // pub async fn calculate_hash(&self) -> Result<String, io::Error> {
-    //     get_hash_from_payload(&self.payload)
-    // }
+    pub async fn calculate_hash(&self) -> Result<String, io::Error> {
+        get_hash_from_payload(&self.payload)
+    }
 
-    // pub fn check_size(&self) -> Result<u64, io::Error> {
-    //     match &self.payload {
-    //         Payload::Path(path) => {
-    //             let meta = metadata(path)?;
-    //             Ok(meta.len())
-    //         }
-    //         Payload::Text(text) => Ok(text.len() as u64),
-    //     }
-    // }
+    pub fn check_size(&self) -> Result<u64, io::Error> {
+        match &self.payload {
+            Payload::Path(path) => {
+                // let meta = metadata(path)?;
+                // Ok(meta.len())
+                Ok(1)
+            }
+            Payload::Text(text) => Ok(text.len() as u64),
+        }
+    }
 
     // /// Creates temporary file from text payload, so this kind of payload
     // /// can be treated as file by the transfer protocol.
@@ -133,18 +134,20 @@ impl fmt::Display for Payload {
     }
 }
 
-// pub fn get_hash_from_payload(payload: &Payload) -> Result<String, io::Error> {
-//     match payload {
-//         Payload::Path(path) => {
-//             let file = File::open(&path)?;
-//             Ok(hash_contents(file)?)
-//         }
-//         Payload::Text(text) => {
-//             let file = FileToSend::create_temp_file(text)?;
-//             Ok(hash_contents(file)?)
-//         }
-//     }
-// }
+pub fn get_hash_from_payload(payload: &Payload) -> Result<String, io::Error> {
+    match payload {
+        Payload::Path(path) => {
+            // let file = File::open(&path)?;
+            // Ok(hash_contents(file)?)
+            Ok("path1".to_string())
+        }
+        Payload::Text(text) => {
+            // let file = FileToSend::create_temp_file(text)?;
+            // Ok(hash_contents(file)?)
+            Ok("text".to_string())
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_channel::{bounded, Receiver, Sender};
+use commands::TransferCommand;
 use futures::{future::join, select, FutureExt, StreamExt};
 
 use libp2p::{
@@ -9,27 +10,29 @@ use libp2p::{
     identity::{self, Keypair},
     ping::PingEvent,
     rendezvous::{client::Event as RendezvousEvent, Cookie, Namespace},
-    swarm::{AddressScore, SwarmEvent},
+    swarm::{AddressScore, NetworkBehaviourEventProcess, SwarmEvent},
     Multiaddr, PeerId,
 };
 
 use js_sys::Promise;
+use peer::PeerEvent;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::future_to_promise;
 
-mod swarm;
-mod utils;
-pub mod commands;
 pub mod behaviour;
+pub mod commands;
 pub mod file;
 pub mod metadata;
 pub mod peer;
 pub mod protocol;
+mod swarm;
+mod utils;
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/dragit.p2p.transfer.metadata.rs"));
 }
 
+use protocol::TransferPayload;
 use swarm::{build_webrtc_swarm, build_ws_swarm, MyBehaviour, MyEvent};
 
 #[macro_export]
@@ -68,6 +71,18 @@ fn discover(behaviour: &mut MyBehaviour, peer: PeerId, cookie: Cookie) {
         .discover(Some(namespace), Some(cookie), None, peer);
 }
 
+impl NetworkBehaviourEventProcess<TransferPayload> for MyBehaviour {
+    fn inject_event(&mut self, event: TransferPayload) {
+        console_log!("Injected {}", event);
+    }
+}
+
+// impl NetworkBehaviourEventProcess<TransferOut> for MyBehaviour {
+//     fn inject_event(&mut self, event: TransferOut) {
+//         console_log!("TransferOut event: {:?}", event);
+//     }
+// }
+
 #[wasm_bindgen]
 pub struct Server {
     rendezvous_addr: Multiaddr,
@@ -76,13 +91,20 @@ pub struct Server {
     known_peers: Arc<Mutex<HashMap<String, PeerRecord>>>,
     tx: Sender<PeerRecord>,
     rx: Arc<Receiver<PeerRecord>>,
+    peer_sender: Sender<PeerEvent>,
+    command_receiver: Receiver<TransferCommand>,
 }
 
 #[wasm_bindgen]
 impl Server {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Server {
-        let rendezvous_addr = format!("/ip4/{}/tcp/45555/ws", SERVER_ADDR).parse::<Multiaddr>().unwrap();
+        let (peer_sender, peer_receiver) = bounded::<PeerEvent>(1024 * 24);
+        let (command_sender, command_receiver) = bounded::<TransferCommand>(1024 * 24);
+
+        let rendezvous_addr = format!("/ip4/{}/tcp/45555/ws", SERVER_ADDR)
+            .parse::<Multiaddr>()
+            .unwrap();
         let local_keys = identity::Keypair::generate_ed25519();
 
         let (tx, rx): (Sender<PeerRecord>, Receiver<PeerRecord>) = bounded(1024);
@@ -93,6 +115,8 @@ impl Server {
             tx,
             // TODO: be careful with those references
             rx: Arc::new(rx),
+            peer_sender,
+            command_receiver,
         }
     }
 
@@ -140,8 +164,15 @@ impl Server {
         let webrtc_addr = format!("/ip4/{}/tcp/8080/ws/p2p-webrtc-star", SERVER_ADDR)
             .parse::<Multiaddr>()
             .unwrap();
+        let command_rec = Arc::new(Mutex::new(self.command_receiver.to_owned()));
+        let command_receiver_c = Arc::clone(&command_rec);
+
         let mut swarm = build_ws_swarm(self.local_keys.clone());
-        let mut swarm_webrtc = build_webrtc_swarm(self.local_keys.clone());
+        let mut swarm_webrtc = build_webrtc_swarm(
+            self.local_keys.clone(),
+            self.peer_sender.clone(),
+            command_receiver_c,
+        );
 
         swarm_webrtc.listen_on(webrtc_addr).unwrap();
 

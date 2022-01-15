@@ -1,14 +1,12 @@
 use std::fmt;
-use std::fs::remove_file;
 use std::io::ErrorKind;
 use std::sync::mpsc::sync_channel;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use std::task::{Context, Poll};
 use std::time::Instant;
 use std::{io, iter, pin::Pin};
 
-use async_std::sync::Mutex;
 use async_channel::{Receiver, Sender};
 use async_std::task;
 
@@ -17,10 +15,10 @@ use futures::io as futio;
 use futures::prelude::*;
 use libp2p::core::{InboundUpgrade, OutboundUpgrade, UpgradeInfo};
 
-use crate::log;
 use crate::console_log;
-use crate::peer::{Direction, PeerEvent};
 use crate::file::{FileToSend, Payload};
+use crate::log;
+use crate::peer::{Direction, PeerEvent};
 // use crate::transfer::jobs;
 use crate::commands::TransferCommand;
 use crate::metadata::{Answer, Metadata};
@@ -31,7 +29,6 @@ pub trait TSocketAlias: AsyncRead + AsyncWrite + Send + Unpin {}
 impl<T: AsyncRead + AsyncWrite + Send + Unpin> TSocketAlias for T {}
 
 pub const CHUNK_SIZE: usize = 4096;
-
 
 #[derive(Clone, Debug)]
 pub enum ProtocolEvent {
@@ -95,21 +92,22 @@ impl TransferPayload {
         &self,
         receiver: Arc<Mutex<Receiver<TransferCommand>>>,
     ) -> TransferCommand {
-        let mut r = receiver.lock().await;
-        // Wait for the user to confirm the incoming file
-        task::block_on(future::poll_fn(
-            move |context: &mut Context| match Receiver::poll_next_unpin(&mut r, context) {
-                Poll::Ready(Some(choice)) => {
-                    console_log!("Got the choice: {:?}", choice);
-                    Poll::Ready(choice)
-                }
-                Poll::Ready(None) => {
-                    console_log!("Nothing to handle now");
-                    Poll::Pending
-                }
-                Poll::Pending => Poll::Pending,
-            },
-        ))
+        // let mut r = receiver.lock().await;
+        // // Wait for the user to confirm the incoming file
+        // task::block_on(future::poll_fn(
+        //     move |context: &mut Context| match Receiver::poll_next_unpin(&mut r, context) {
+        //         Poll::Ready(Some(choice)) => {
+        //             console_log!("Got the choice: {:?}", choice);
+        //             Poll::Ready(choice)
+        //         }
+        //         Poll::Ready(None) => {
+        //             console_log!("Nothing to handle now");
+        //             Poll::Pending
+        //         }
+        //         Poll::Pending => Poll::Pending,
+        //     },
+        // ))
+        TransferCommand::Accept("1234".to_string())
     }
 
     async fn read_file_payload(
@@ -124,7 +122,7 @@ impl TransferPayload {
         let mut payloads: Vec<u8> = vec![];
         let (sender, receiver) = sync_channel::<Vec<u8>>(CHUNK_SIZE * 128);
         // let path =
-            // user_data::get_target_path(&meta.get_safe_file_name(), self.target_path.as_ref())?;
+        // user_data::get_target_path(&meta.get_safe_file_name(), self.target_path.as_ref())?;
 
         // let job = jobs::spawn_write_file_job(receiver, path.clone());
 
@@ -204,11 +202,11 @@ impl TransferPayload {
 
                 self.name = meta.name;
                 self.hash = meta.hash;
-                self.payload = Payload::new(meta.transfer_type, "")?;
+                self.payload = Payload::new(meta.transfer_type, "".to_string())?;
                 self.size_bytes = 1;
 
                 // TransferPayload needs to know where is the actual file after successful transfer.
-                self.target_path = Some("");
+                self.target_path = Some("".to_string());
 
                 Ok(())
             }
@@ -254,7 +252,7 @@ impl TransferOut {
 
         if accepted {
             let mut writer = futio::BufWriter::new(socket);
-            let file = self.file.get_file()?;
+            // let file = self.file.get_file()?;
             // let job = jobs::spawn_read_file_job(sender.clone(), file);
 
             // util::notify_progress(&self.sender_queue, 0, size, &direction).await;

@@ -1,6 +1,8 @@
 use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use async_channel::{Receiver, Sender};
 use libp2p::{
     core::transport::upgrade,
     identity::Keypair,
@@ -13,16 +15,16 @@ use libp2p::{
 use libp2p_webrtc::WebRtcTransport;
 use wasm_bindgen_futures::spawn_local;
 
+use crate::behaviour::TransferBehaviour;
+use crate::console_log;
+use crate::protocol::{TransferOut, TransferPayload};
+use crate::{behaviour::TransferEvent, commands::TransferCommand, log, peer::PeerEvent};
+
 #[derive(Debug)]
 pub enum MyEvent {
-    Ping(PingEvent),
+    // TransferBehaviour(TransferEvent),
     Rendezvous(RendezvousEvent),
-}
-
-impl From<PingEvent> for MyEvent {
-    fn from(event: PingEvent) -> Self {
-        MyEvent::Ping(event)
-    }
+    Ping(PingEvent),
 }
 
 #[derive(NetworkBehaviour)]
@@ -30,11 +32,24 @@ impl From<PingEvent> for MyEvent {
 pub struct MyBehaviour {
     pub rendezvous: RendezvousBehaviour,
     ping: Ping,
+    // transfer: TransferBehaviour,
 }
 
 impl From<RendezvousEvent> for MyEvent {
     fn from(event: RendezvousEvent) -> Self {
         MyEvent::Rendezvous(event)
+    }
+}
+
+// impl From<TransferEvent> for MyEvent {
+//     fn from(event: TransferEvent) -> Self {
+//         MyEvent::TransferBehaviour(event)
+//     }
+// }
+
+impl From<PingEvent> for MyEvent {
+    fn from(event: PingEvent) -> Self {
+        MyEvent::Ping(event)
     }
 }
 
@@ -75,7 +90,11 @@ pub fn build_ws_swarm(local_keys: Keypair) -> Swarm<MyBehaviour> {
     swarm.build()
 }
 
-pub fn build_webrtc_swarm(local_keys: Keypair) -> Swarm<Ping> {
+pub fn build_webrtc_swarm(
+    local_keys: Keypair,
+    peer_sender: Sender<PeerEvent>,
+    command_receiver: Arc<Mutex<Receiver<TransferCommand>>>,
+) -> Swarm<TransferBehaviour> {
     let local_peer_id = PeerId::from(&local_keys.public());
 
     let transport_base = WebRtcTransport::new(local_peer_id, vec!["stun:stun.l.google.com:19302"]);
@@ -97,11 +116,14 @@ pub fn build_webrtc_swarm(local_keys: Keypair) -> Swarm<Ping> {
             .boxed()
     };
 
-    let ping_behaviour = Ping::new(
-        PingConfig::new()
-            .with_interval(Duration::from_secs(2))
-            .with_keep_alive(true),
-    );
-    let swarm = SwarmBuilder::new(transport, ping_behaviour, local_peer_id);
+    // let ping_behaviour = Ping::new(
+    //     PingConfig::new()
+    //         .with_interval(Duration::from_secs(2))
+    //         .with_keep_alive(true),
+    // );
+
+    let transfer_behaviour = TransferBehaviour::new(peer_sender.clone(), command_receiver, None);
+
+    let swarm = SwarmBuilder::new(transport, transfer_behaviour, local_peer_id);
     swarm.executor(Box::new(|f| spawn_local(f))).build()
 }

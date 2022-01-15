@@ -1,9 +1,8 @@
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use async_std::sync::Mutex;
 use async_channel::{Receiver, Sender};
 
 use libp2p::core::{connection::ConnectionId, ConnectedPoint, Multiaddr, PeerId};
@@ -12,17 +11,25 @@ use libp2p::swarm::{
     PollParameters, SubstreamProtocol,
 };
 
-use crate::log;
-use crate::console_log;
-use crate::protocol::{ProtocolEvent, TransferOut, TransferPayload};
 use crate::commands::TransferCommand;
-use crate::peer::PeerEvent;
+use crate::console_log;
 use crate::file::{FileToSend, Payload};
+use crate::log;
+use crate::peer::PeerEvent;
+use crate::protocol::{ProtocolEvent, TransferOut, TransferPayload};
 
 const TIMEOUT: u64 = 600;
 
+#[derive(Debug)]
+pub struct TransferEvent(TransferPayload);
+
 pub struct TransferBehaviour {
-    pub events: Vec<NetworkBehaviourAction<TransferOut, TransferPayload>>,
+    pub events: Vec<
+        NetworkBehaviourAction<
+            TransferEvent,
+            OneShotHandler<TransferPayload, TransferOut, ProtocolEvent>,
+        >,
+    >,
     payloads: Vec<FileToSend>,
     pub sender: Sender<PeerEvent>,
     receiver: Arc<Mutex<Receiver<TransferCommand>>>,
@@ -51,7 +58,7 @@ impl TransferBehaviour {
 
 impl NetworkBehaviour for TransferBehaviour {
     type ProtocolsHandler = OneShotHandler<TransferPayload, TransferOut, ProtocolEvent>;
-    type OutEvent = TransferPayload;
+    type OutEvent = TransferEvent;
 
     fn new_handler(&mut self) -> Self::ProtocolsHandler {
         let timeout = Duration::from_secs(TIMEOUT);
@@ -85,16 +92,19 @@ impl NetworkBehaviour for TransferBehaviour {
         peer: &PeerId,
         c: &ConnectionId,
         endpoint: &ConnectedPoint,
+        _failed_addresses: Option<&Vec<Multiaddr>>,
     ) {
         console_log!(
             "Connection established: {:?}, {:?}, c: {:?}",
-            peer, endpoint, c
+            peer,
+            endpoint,
+            c
         )
     }
 
-    fn inject_dial_failure(&mut self, peer: &PeerId) {
-        console_log!("Dial failure: {:?}", peer);
-    }
+    // fn inject_dial_failure(&mut self, peer: &PeerId) {
+    //     console_log!("Dial failure: {:?}", peer);
+    // }
 
     fn inject_disconnected(&mut self, _peer: &PeerId) {}
 
@@ -103,7 +113,7 @@ impl NetworkBehaviour for TransferBehaviour {
         match event {
             ProtocolEvent::Received(data) => self
                 .events
-                .push(NetworkBehaviourAction::GenerateEvent(data)),
+                .push(NetworkBehaviourAction::GenerateEvent(TransferEvent(data))),
             ProtocolEvent::Sent => return,
         };
     }
@@ -112,7 +122,7 @@ impl NetworkBehaviour for TransferBehaviour {
         &mut self,
         _: &mut Context,
         _: &mut impl PollParameters,
-    ) -> Poll<NetworkBehaviourAction<TransferOut, TransferPayload>> {
+    ) -> Poll<NetworkBehaviourAction<Self::OutEvent, Self::ProtocolsHandler>> {
         if let Some(file) = self.payloads.pop() {
             let peer_id = file.peer.clone();
             let transfer = TransferOut {
