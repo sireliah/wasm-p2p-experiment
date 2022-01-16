@@ -49,6 +49,10 @@
         return server;
       }
 
+      async function callPeer(event) {
+        await server.call_peer(event.currentTarget.value);
+      }
+
       async function addPeer(server) {
           const peers_str = await server.get_peers();
           const peers = peers_str.split(" ");
@@ -63,7 +67,7 @@
 
           for (let child of document.querySelector("#peer_list").children) {
             if (child.type === "button") {
-              child.addEventListener("click", async function () { await server.call_peer(child.value) });
+              child.addEventListener("click", callPeer);
             }
           };
 
