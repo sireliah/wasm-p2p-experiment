@@ -107,7 +107,7 @@ impl TransferPayload {
         //         Poll::Pending => Poll::Pending,
         //     },
         // ))
-        TransferCommand::Accept("1234".to_string())
+        TransferCommand::Accept("5d41402abc4b2a76b9719d911017c592".to_string())
     }
 
     async fn read_file_payload(
@@ -188,17 +188,17 @@ impl TransferPayload {
             TransferCommand::Accept(hash) if hash == meta.hash => {
                 Answer::write(&mut socket, true, hash).await?;
 
-                // let (counter, path) = match self
-                //     .read_file_payload(socket, &meta, meta.size, &direction)
-                //     .await
-                // {
-                //     Ok((counter, path)) => (counter, path),
-                //     Err(err) => {
-                //         console_log!("Reading payload failed: {:?}", err);
-                //         util::notify_error(&self.sender_queue, "Reading payload failed").await;
-                //         return Err(err);
-                //     }
-                // };
+                let (counter, path) = match self
+                    .read_file_payload(socket, &meta, meta.size, &direction)
+                    .await
+                {
+                    Ok((counter, path)) => (counter, path),
+                    Err(err) => {
+                        console_log!("Reading payload failed: {:?}", err);
+                        // util::notify_error(&self.sender_queue, "Reading payload failed").await;
+                        return Err(err);
+                    }
+                };
 
                 self.name = meta.name;
                 self.hash = meta.hash;
@@ -252,6 +252,8 @@ impl TransferOut {
 
         if accepted {
             let mut writer = futio::BufWriter::new(socket);
+
+            // TODO: figure out how to transfer the file in the browser
             // let file = self.file.get_file()?;
             // let job = jobs::spawn_read_file_job(sender.clone(), file);
 
@@ -326,10 +328,10 @@ where
     fn upgrade_inbound(mut self, socket: TSocket, _: Self::Info) -> Self::Future {
         Box::pin(async move {
             console_log!("Upgrade inbound");
-            let start = Instant::now();
+            // let start = Instant::now();
             self.read_socket(socket).await?;
 
-            console_log!("Finished {:?} ms", start.elapsed().as_millis());
+            // console_log!("Finished {:?} ms", start.elapsed().as_millis());
             Ok(self)
         })
     }
@@ -346,11 +348,11 @@ where
     fn upgrade_outbound(self, socket: TSocket, _: Self::Info) -> Self::Future {
         Box::pin(async move {
             console_log!("Upgrade outbound");
-            let start = Instant::now();
+            // let start = Instant::now();
 
             self.write_socket(socket).await?;
 
-            console_log!("Finished {:?} ms", start.elapsed().as_millis());
+            // console_log!("Finished {:?} ms", start.elapsed().as_millis());
             Ok(())
         })
     }

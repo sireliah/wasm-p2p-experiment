@@ -112,7 +112,8 @@ pub fn build_webrtc_swarm(
             .upgrade(upgrade::Version::V1Lazy)
             .authenticate(noise)
             .multiplex(mp.clone())
-            .timeout(std::time::Duration::from_secs(20))
+            // Keep connection for longer now
+            .timeout(std::time::Duration::from_secs(200))
             .boxed()
     };
 

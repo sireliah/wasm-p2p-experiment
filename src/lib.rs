@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs::File;
 use std::sync::{Arc, Mutex};
 
 use async_channel::{bounded, Receiver, Sender};
@@ -32,6 +33,7 @@ pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/dragit.p2p.transfer.metadata.rs"));
 }
 
+use file::{FileToSend, Payload};
 use protocol::TransferPayload;
 use swarm::{build_webrtc_swarm, build_ws_swarm, MyBehaviour, MyEvent};
 
@@ -93,6 +95,8 @@ pub struct Server {
     rx: Arc<Receiver<PeerRecord>>,
     peer_sender: Sender<PeerEvent>,
     command_receiver: Receiver<TransferCommand>,
+    file_sender: Sender<FileToSend>,
+    file_receiver: Arc<Receiver<FileToSend>>,
 }
 
 #[wasm_bindgen]
@@ -100,7 +104,8 @@ impl Server {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Server {
         let (peer_sender, peer_receiver) = bounded::<PeerEvent>(1024 * 24);
-        let (command_sender, command_receiver) = bounded::<TransferCommand>(1024 * 24);
+        let (command_sender, command_receiver) = bounded::<TransferCommand>(1024);
+        let (file_sender, file_receiver) = bounded::<FileToSend>(32);
 
         let rendezvous_addr = format!("/ip4/{}/tcp/45555/ws", SERVER_ADDR)
             .parse::<Multiaddr>()
@@ -117,6 +122,8 @@ impl Server {
             rx: Arc::new(rx),
             peer_sender,
             command_receiver,
+            file_sender,
+            file_receiver: Arc::new(file_receiver),
         }
     }
 
@@ -148,7 +155,9 @@ impl Server {
         console_log!("Call peer: {:?}", peer_id);
         let response = match self.known_peers.lock().unwrap().get(&peer_id) {
             Some(record) => {
-                self.tx.try_send(record.to_owned()).unwrap();
+                // self.tx.try_send(record.to_owned()).unwrap();
+                let file = FileToSend::new(&record.peer_id(), Payload::Text("hello".to_string())).unwrap();
+                self.file_sender.try_send(file);
                 Ok(JsValue::from_str("sent"))
             }
             None => Err(JsValue::from_str("")),
@@ -183,6 +192,8 @@ impl Server {
         let known_peers = self.known_peers.clone();
         let local_peer_id = self.peer_id();
         let rx = self.rx.clone();
+        let tx = self.tx.clone();
+        let file_receiver = self.file_receiver.clone();
 
         let sw1 = async move {
             let mut cookie = None;
@@ -245,6 +256,7 @@ impl Server {
                         cookie.replace(new_cookie);
                         for registration in registrations {
                             if registration.record.peer_id() != local_peer_id {
+                                tx.try_send(registration.record.clone()).unwrap();
                                 known_peers
                                     .lock()
                                     .expect("Inserting on lock failed")
@@ -289,16 +301,28 @@ impl Server {
                         match record {
                                 Ok(rec) => {
                                     console_log!("Record!!! {:?}", rec);
+                                    let peer_id = rec.peer_id();
                                     let address = format!(
                                         "/ip4/{}/tcp/8080/ws/p2p-webrtc-star/p2p/{}",
                                         SERVER_ADDR,
-                                        rec.peer_id()
+                                        peer_id
                                     )
                                     .parse::<Multiaddr>()
                                     .expect("Parsing failed");
-                                    if !swarm_webrtc.is_connected(&rec.peer_id()) {
+                                    if !swarm_webrtc.is_connected(&peer_id) {
                                         swarm_webrtc.dial(address).expect("Dialing webrtc failed");
                                     }
+                                }
+                                Err(e) => {
+                                    console_log!("Recv error: {:?}", e);
+                                }
+                            };
+                        }
+                    maybe_file = file_receiver.recv().fuse() => {
+                        match maybe_file {
+                                Ok(file) => {
+                                    console_log!("Got file from the queue {:?}", file);
+                                    swarm_webrtc.behaviour_mut().push_file(file).unwrap();
                                 }
                                 Err(e) => {
                                     console_log!("Recv error: {:?}", e);

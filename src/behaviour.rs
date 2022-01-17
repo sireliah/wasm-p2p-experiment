@@ -72,7 +72,7 @@ impl NetworkBehaviour for TransferBehaviour {
             target_path: self.target_path.clone(),
         };
         let handler_config = OneShotHandlerConfig {
-            keep_alive_timeout: Duration::from_secs(5),
+            keep_alive_timeout: Duration::from_secs(5000),
             outbound_substream_timeout: timeout,
             // Default from the library
             max_dial_negotiated: 8,
@@ -124,6 +124,7 @@ impl NetworkBehaviour for TransferBehaviour {
         _: &mut impl PollParameters,
     ) -> Poll<NetworkBehaviourAction<Self::OutEvent, Self::ProtocolsHandler>> {
         if let Some(file) = self.payloads.pop() {
+            console_log!("File in the queue: {:?}", file);
             let peer_id = file.peer.clone();
             let transfer = TransferOut {
                 file,

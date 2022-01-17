@@ -52,6 +52,7 @@ impl Metadata {
         file: &FileToSend,
         mut socket: impl TSocketAlias,
     ) -> Result<(usize, impl TSocketAlias), io::Error> {
+        console_log!("Writing metadata");
         let hash = file.calculate_hash().await?;
         let size = file.check_size()?;
 
@@ -154,7 +155,7 @@ async fn read_from_socket(
     Ok((data, socket))
 }
 
-pub fn hash_contents(mut file: fs::File) -> Result<String, Error> {
+pub fn hash_contents(mut file: impl Read) -> Result<String, Error> {
     let mut state = Md5::default();
     let mut buffer = [0u8; HASH_BUFFER_SIZE];
 

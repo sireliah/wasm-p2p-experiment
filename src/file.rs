@@ -10,6 +10,8 @@ use libp2p::core::PeerId;
 use crate::console_log;
 use crate::log;
 use crate::peer::TransferType;
+use crate::metadata::hash_contents;
+
 
 #[derive(Clone, Debug)]
 pub enum Payload {
@@ -65,12 +67,12 @@ impl FileToSend {
         }
     }
 
-    // pub fn get_file(&self) -> Result<File, io::Error> {
-    //     match &self.payload {
-    //         Payload::Text(text) => Ok(Self::create_temp_file(text)?),
-    //         Payload::Path(path) => Ok(File::open(path)?),
-    //     }
-    // }
+    pub fn get_file(&self) -> Result<File, io::Error> {
+        match &self.payload {
+            Payload::Text(text) => Ok(text.as_bytes()),
+            Payload::Path(path) => Ok(File::open(path)?),
+        }
+    }
 
     pub async fn calculate_hash(&self) -> Result<String, io::Error> {
         get_hash_from_payload(&self.payload)
@@ -143,8 +145,8 @@ pub fn get_hash_from_payload(payload: &Payload) -> Result<String, io::Error> {
         }
         Payload::Text(text) => {
             // let file = FileToSend::create_temp_file(text)?;
-            // Ok(hash_contents(file)?)
-            Ok("text".to_string())
+            Ok(hash_contents(text.as_bytes())?)
+            // Ok("text".to_string())
         }
     }
 }
